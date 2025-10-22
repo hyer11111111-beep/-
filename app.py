@@ -1,16 +1,30 @@
 import streamlit as st
 import pandas as pd
-import zipfile
 import os
 import requests
 from datetime import datetime
 
-st.title("맞춤형 관광지 추천 — 연령 · 지역 · 계절 · 키워드 기반")
+# Page config must be set before any Streamlit UI calls
+st.set_page_config(page_title="여행·지역·세대별 관광지 추천", layout="wide")
 
+# Load custom styles (styles.css should be in the same folder as app.py)
+def local_css(file_name: str):
+    try:
+        with open(file_name, 'r', encoding='utf-8') as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except FileNotFoundError:
+        # If styles not found, continue with default Streamlit styles
+        st.warning("스타일 파일(styles.css)을 찾을 수 없어 기본 스타일로 표시됩니다.")
+
+local_css('styles.css')
+
+# Header (simple and non-duplicating)
 st.markdown("""
-본 서비스는 사용자의 연령대, 희망 지역, 선호 계절 및 키워드를 바탕으로 신뢰할 수 있는 데이터 소스를 결합해 맞춤형 관광지를 추천합니다.
-간결하고 직관적인 인터페이스로 추천 결과를 제공합니다.
-""")
+<div class="block-container">
+    <h1>여행·지역·세대별 관광지 추천</h1>
+    <p class="muted">나이, 지역, 계절과 간단한 키워드만 입력하면 바로 추천을 받아볼 수 있어요.</p>
+</div>
+""", unsafe_allow_html=True)
 
 # 1. 사용자 입력 (사이드바)
 with st.sidebar:
@@ -39,6 +53,19 @@ with st.sidebar:
 
     keyword = st.text_input("검색 키워드 (예: 벚꽃, 해수욕장)")
 
+    # 간단한 추천 키워드 제안 (일반 사용자용)
+    season_keywords = {
+        "봄": ["벚꽃", "봄꽃축제", "야외공원", "계곡"],
+        "여름": ["해수욕장", "계곡", "물놀이", "산책로"],
+        "가을": ["단풍", "가을축제", "산책", "호수"],
+        "겨울": ["눈꽃", "스키장", "온천", "겨울축제"]
+    }
+    suggested = st.selectbox("추천 키워드 (선택)", ["(선택)"] + season_keywords.get(default_season, []))
+    if suggested and suggested != "(선택)":
+        keyword = suggested
+    # 관광지 전용 필터 토글 (기본: 해제 -> 키워드 검색 우선)
+    filter_only_tourist = st.checkbox("관광지만 보기(정확도↑, 일부 키워드 누락 가능)", value=False)
+
 # 2. 나이 → 세대 텍스트 변환
 def get_age_group(age):
     if age < 20:
@@ -56,62 +83,60 @@ def get_age_group(age):
 
 age_group = get_age_group(age)
 
-# 3. ZIP 파일 경로 설정 (예시)
-zip_paths = {
-    "서울특별시": r"C:\Users\406\Downloads\20251021122427_서울특별시_202410-202509_데이터랩_다운로드.zip",
-    "부산광역시": r"C:\Users\406\Downloads\20251021125950_부산광역시_202410-202509_데이터랩_다운로드.zip",
-    "제주특별자치도": r"C:\Users\406\Downloads\20251021144848_제주특별자치도_202410-202509_데이터랩_다운로드.zip",
-    "강원특별자치도": r"C:\Users\406\Downloads\20251021144903_강원특별자치도_202410-202509_데이터랩_다운로드.zip",
-    "대전광역시": r"C:\Users\406\Downloads\20251021144912_대전광역시_202410-202509_데이터랩_다운로드.zip",
-    "대구광역시": r"C:\Users\406\Downloads\20251021144926_대구광역시_202410-202509_데이터랩_다운로드.zip"
+# 3. CSV 폴더 경로 설정 (ZIP → 폴더로 변경)
+folder_paths = {
+    "서울특별시": r"C:\Users\406\Documents\GitHub\-\data\20251021122427_서울특별시_202410-202509_데이터랩_다운로드",
+    "부산광역시": r"C:\Users\406\Documents\GitHub\-\data\20251021125950_부산광역시_202410-202509_데이터랩_다운로드",
+    "제주특별자치도": r"C:\Users\406\Documents\GitHub\-\data\20251021144848_제주특별자치도_202410-202509_데이터랩_다운로드",
+    "강원특별자치도": r"C:\Users\406\Documents\GitHub\-\data\20251021144903_강원특별자치도_202410-202509_데이터랩_다운로드",
+    "대전광역시": r"C:\Users\406\Documents\GitHub\-\data\20251021144912_대전광역시_202410-202509_데이터랩_다운로드",
+    "대구광역시": r"C:\Users\406\Documents\GitHub\-\data\20251021144926_대구광역시_202410-202509_데이터랩_다운로드"
 }
 
-nationwide_zip = r"C:\Users\406\Downloads\20251021114705_전국_202410-202509_데이터랩_다운로드.zip"
+nationwide_folder = r"C:\Users\406\Documents\GitHub\-\data\20251021114705_전국_202410-202509_데이터랩_다운로드"
 
-# 4. ZIP 안 CSV 읽기 함수
+# 4. 폴더에서 CSV 불러오기
 @st.cache_data
-def load_csv_from_zip(zip_path, keyword):
-    extract_to = "unzipped"
-    os.makedirs(extract_to, exist_ok=True)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_to)
-    for fname in os.listdir(extract_to):
+def load_csv_from_folder(folder_path, keyword):
+    if not os.path.isdir(folder_path):
+        st.error(f"경로가 존재하지 않습니다: {folder_path}")
+        return None
+    for fname in os.listdir(folder_path):
         if keyword in fname and fname.endswith(".csv"):
-            df = pd.read_csv(os.path.join(extract_to, fname), encoding='utf-8')
-            return df
+            try:
+                df = pd.read_csv(os.path.join(folder_path, fname), encoding='utf-8')
+                return df
+            except UnicodeDecodeError:
+                try:
+                    df = pd.read_csv(os.path.join(folder_path, fname), encoding='cp949')
+                    return df
+                except Exception as e:
+                    st.error(f"CSV 파일 인코딩 오류: {e}")
+                    return None
     return None
 
 # 5. 데이터 불러오기
-df_age = load_csv_from_zip(nationwide_zip, f"세대별 인기관광지({age_group})")
-df_region = load_csv_from_zip(zip_paths[region_full], f"세대별 인기관광지({age_group})")
+df_age = load_csv_from_folder(nationwide_folder, f"세대별 인기관광지({age_group})")
+df_region = load_csv_from_folder(folder_paths[region_full], f"세대별 인기관광지({age_group})")
 
-# 6. (선택) 컬럼 확인은 개발/디버깅 시에만 사용합니다. 운영 시 주석 처리 권장.
-
-# 7. 병합 및 필수 컬럼만 남기기
+# 6. 병합 및 필수 컬럼만 남기기
 if df_age is not None and df_region is not None:
     try:
         df_recommended = pd.merge(df_age, df_region, on='관심지점명', how='inner')
-
-        # '순위', '관광지ID', '관심지점명', '연령대', '비율' 컬럼만 남기기
         cols_to_keep = ['순위', '관광지ID', '관심지점명', '연령대', '비율']
-
-        # 만약 병합하면서 컬럼명 충돌로 _x, _y 붙었다면 처리
         all_cols = df_recommended.columns.tolist()
 
-        # 실제로 남은 컬럼 중 위 컬럼들 이름 포함한 거 찾기
         selected_cols = []
         for col in cols_to_keep:
             if col in all_cols:
                 selected_cols.append(col)
             else:
-                # _x 또는 _y 붙은 컬럼 찾기
                 for suffix in ['_x', '_y']:
                     if col + suffix in all_cols:
                         selected_cols.append(col + suffix)
                         break
 
         df_recommended = df_recommended[selected_cols]
-        # 컬럼명 앞뒤 공백 제거
         df_recommended.columns = df_recommended.columns.str.strip()
     except Exception as e:
         st.error(f"병합 중 오류 발생: {e}")
@@ -120,116 +145,135 @@ else:
     st.warning("데이터를 불러오지 못했습니다.")
     df_recommended = pd.DataFrame()
 
-# 8. 카카오 API 키 숨겨서 불러오기
-api_key = st.secrets["KAKAO_REST_API_KEY"]
+# 7. 실시간 검색(외부 서비스) 키 불러오기
+api_key = st.secrets.get("KAKAO_REST_API_KEY", None)
 
-# 9. 카카오 API 함수 (키워드, 지역 기반 검색)
-def search_kakao_local(region, keyword, api_key):
-    # 기본 입력 검증
+# 카카오 API 관광지만 필터링 함수
+def filter_tourist_spots(results, filter_category=True):
+    # 카카오 로컬 API에서 관광지 카테고리 그룹코드: 'AT4'
+    if not filter_category:
+        return results
+    return [place for place in results if place.get('category_group_code') == 'AT4']
+
+# 카카오 로컬 API 검색 함수 (통합 및 에러 처리 강화, 키워드 보정 포함)
+def search_local_popular(region, keyword, api_key, filter_category=True):
     if not api_key:
-        st.error("카카오 REST API 키가 설정되어 있지 않습니다. `st.secrets` 또는 secrets.toml을 확인하세요.")
+        st.warning("API 키가 필요합니다.")
         return []
-    if not region or not keyword:
-        st.warning("지역과 키워드를 모두 입력해야 검색할 수 있습니다.")
+    if not region:
+        st.warning("지역을 입력해 주세요.")
         return []
+
+    # keyword가 비었거나 '관광지'일 때 보정
+    if not keyword or keyword.strip() == "" or keyword.strip() == "관광지":
+        keyword = "명소"
 
     query = f"{region} {keyword}"
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
     headers = {"Authorization": f"KakaoAK {api_key}"}
-    params = {"query": query, "size": 20}
+    # Kakao Local API allows up to 15 results per request for keyword search
+    requested_size = 30
+    max_size = 15
+    size = min(requested_size, max_size)
+    params = {"query": query, "size": size}
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
     except requests.RequestException as e:
-        st.error(f"카카오 API 호출 중 네트워크 오류가 발생했습니다: {e}")
+        st.error(f"네트워크 오류로 카카오 API 호출에 실패했습니다: {e}")
         return []
 
-    # 응답 검사: 실패 시 상세 메시지 표출(디버깅용)
+    # If non-200, show response body where possible to help debugging (400 메시지 등)
     if response.status_code != 200:
-        # 가능한 디버깅 정보를 함께 출력
+        body_text = None
         try:
             body = response.json()
+            # Kakao returns a 'message' field in many errors
+            body_text = body.get('message') or str(body)
         except Exception:
-            body = response.text
+            body_text = response.text
+
         st.error(f"카카오 API 호출 실패 (status: {response.status_code})")
-        with st.expander("응답 상세 (디버깅)"):
-            st.write(body)
+        with st.expander("응답 본문 (개발용)"):
+            st.write(body_text)
+
+        # Common cause: size too large or malformed query
+        if response.status_code == 400:
+            st.info("(원인 추정) 요청 파라미터에 문제가 있을 수 있습니다. 쿼리 길이/특수문자 또는 size 파라미터를 확인하세요. 자동으로 size를 15로 제한했습니다.")
+
         return []
 
-    # 정상 응답
     try:
-        return response.json().get("documents", [])
-    except ValueError:
-        st.error("카카오 API 응답을 파싱하지 못했습니다.")
+        data = response.json()
+    except Exception as e:
+        st.error(f"카카오 응답을 파싱하지 못했습니다: {e}")
         return []
 
-# 10. 버튼 누르면 카카오 API 호출 및 결과 보여주기
-if st.button("카카오 API로 키워드 검색"):
-    if not keyword:
-        st.warning("검색 키워드를 입력하세요.")
-    else:
-        kakao_results = search_kakao_local(region_full, keyword, api_key)
-        if kakao_results:
-            df_kakao = pd.DataFrame(kakao_results)
-            st.subheader(f"카카오 API 검색 결과 ({len(df_kakao)}건)")
-            # 주로 보여줄 컬럼만 선택
-            cols = [c for c in ['place_name', 'address_name', 'phone'] if c in df_kakao.columns]
-            st.dataframe(df_kakao[cols].fillna("-"))
+    places = data.get("documents", [])
+    return filter_tourist_spots(places, filter_category=filter_category)
+
+
+def search_places_by_names(names, region, api_key, max_per=1):
+    """각 관광지명을 가지고 개별 검색을 수행합니다. 필터는 기본적으로 해제하여 이름 기반 매칭을 우선시합니다."""
+    matches = []
+    for name in names:
+        if not name or pd.isna(name):
+            continue
+        # sanitize name: remove problematic characters and trim
+        qname = str(name).strip()
+        qname = qname.replace('\n', ' ').replace('\r', ' ')
+        # remove excessive punctuation that may break query
+        for ch in ['/', '\\', '?', '&', '%', '#']:
+            qname = qname.replace(ch, ' ')
+        qname = ' '.join(qname.split())
+        res = search_local_popular(region, qname, api_key, filter_category=False)
+        if res:
+            for r in res[:max_per]:
+                matches.append({
+                    '원래명': name,
+                    '매칭명': r.get('place_name'),
+                    '카테고리': r.get('category_name'),
+                    '주소': r.get('address_name'),
+                    '전화': r.get('phone'),
+                    '링크': r.get('place_url')
+                })
         else:
-            st.warning("검색 결과가 없습니다. (키, 네트워크, 쿼리 확인) ")
+            matches.append({'원래명': name, '매칭명': None, '카테고리': None, '주소': None, '전화': None, '링크': None})
+    return pd.DataFrame(matches)
 
-# 11. 최종 추천 결과 보여주기
-def drop_sensitive_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """'관광지ID' 및 '관광지명' 계열 컬럼을 제거(안전하게)합니다.
+# 버튼 클릭 시
+if st.button("현지 인기명소 찾아보기"):
+    # 빈 키워드인 경우에도 '명소' 키워드로 자동 대체
+    search_keyword = keyword
+    if not search_keyword or search_keyword.strip() == "":
+        search_keyword = "명소"
+    elif search_keyword.strip() == "관광지":
+        search_keyword = "명소"
 
-    대소문자, 공백, _x/_y 접미사 변형을 모두 처리합니다.
-    """
-    if df is None or df.empty:
-        return df
-    cols = df.columns.tolist()
-    to_drop = []
-    normalized_targets = {"관광지id", "관광지id" , "관광지명", "관광지명"}
-    for col in cols:
-        norm = col.replace(" ", "").lower()
-        # 접미사 제거 (_x, _y)
-        if norm.endswith("_x") or norm.endswith("_y"):
-            norm = norm[:-2]
-        if any(target in norm for target in normalized_targets):
-            to_drop.append(col)
-    if to_drop:
-        df = df.drop(columns=to_drop, errors='ignore')
-    return df
+    with st.spinner('현지 관광지를 불러오는 중입니다...'):
+        kakao_results = search_local_popular(region_full, search_keyword, api_key, filter_category=filter_only_tourist)
 
-if not df_recommended.empty:
-    # 카카오 인기 관광지 표시용 (관심지점명 기준)
-    if 'kakao_results' in locals() and kakao_results:
-        kakao_names = [place['place_name'] for place in kakao_results]
-        df_recommended['카카오인기지'] = df_recommended['관심지점명'].apply(lambda x: "예" if x in kakao_names else "아니오")
+    # 필터가 켜져있고 결과가 없으면 자동으로 필터 해제하고 재검색
+    if filter_only_tourist and not kakao_results:
+        st.info('관광지 전용 필터로는 결과가 없어서 전체 검색으로 재시도합니다...')
+        with st.spinner('전체 검색 중...'):
+            kakao_results = search_local_popular(region_full, search_keyword, api_key, filter_category=False)
+
+    if kakao_results:
+        df_kakao = pd.DataFrame(kakao_results)
+        st.subheader(f"현지 관광지 추천 결과 ({len(df_kakao)}건)")
+        cols = [c for c in ['place_name', 'category_name', 'address_name', 'phone', 'place_url'] if c in df_kakao.columns]
+        display = df_kakao[cols].fillna("-")
+        display = display.rename(columns={
+            'place_name': '장소명',
+            'category_name': '카테고리',
+            'address_name': '주소',
+            'phone': '전화번호',
+            'place_url': '상세보기 링크'
+        })
+        st.markdown('<div class="recommend-card">', unsafe_allow_html=True)
+        st.dataframe(display)
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.success("더 많은 결과는 상세보기 링크에서 확인하세요.")
     else:
-        df_recommended['카카오인기지'] = "검색없음"
-    
-    # 카카오 인기 여부 컬럼 추가
-    if 'kakao_results' in locals() and kakao_results:
-        kakao_names = [place['place_name'] for place in kakao_results]
-        if '관심지점명' in df_recommended.columns:
-            df_recommended['카카오인기지'] = df_recommended['관심지점명'].apply(lambda x: "예" if x in kakao_names else "아니오")
-        else:
-            df_recommended['카카오인기지'] = "검색없음"
-    else:
-        df_recommended['카카오인기지'] = "검색없음"
-
-    # 민감/불필요 컬럼 제거
-    df_display = drop_sensitive_columns(df_recommended.copy())
-
-    # 제목 및 출력
-    header_name = f"{name}님, 추천 관광지 리스트" if name else "추천 관광지 리스트"
-    st.header(header_name)
-    st.subheader(f"대상: {age_group} | 지역: {region_full} | 계절: {season}")
-    st.dataframe(df_display)
-else:
-    st.info("추천 데이터가 없습니다.")
-
-st.markdown("""
----
-데이터 출처: 데이터랩 관광지 빅데이터 (https://datalab.visitkorea.or.kr/)
-""")
+        st.warning("검색 결과가 없습니다. 키워드를 바꿔 시도해 보세요.")

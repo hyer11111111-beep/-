@@ -5,8 +5,20 @@ import os
 import requests
 from datetime import datetime
 
+st.set_page_config(page_title="여행 추천 (간편)", layout="wide")
+
+# Load styles if available
+def local_css(file_name: str):
+    try:
+        with open(file_name, 'r', encoding='utf-8') as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.warning("styles.css를 찾을 수 없어 기본 스타일로 표시됩니다.")
+
+local_css('styles.css')
+
 # 1️⃣ 사용자 입력
-st.title("📌 나이대 + 지역별 + 계절별 맞춤 관광지 추천")
+st.title("📌 간편 여행 추천")
 
 name = st.text_input("이름")
 age = st.slider("나이", 10, 80, 30)
@@ -104,8 +116,8 @@ else:
     st.warning("데이터를 불러오지 못했습니다. ZIP 경로 및 파일명을 확인하세요.")
     df_recommended = pd.DataFrame()
 
-# 8️⃣ 카카오 API를 이용한 계절별 인기 키워드 기반 관광지 검색 함수
-def search_kakao_local(query, api_key):
+# 8️⃣ 실시간 인기명소 검색 함수
+def search_local_popular(query, api_key):
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
     headers = {"Authorization": f"KakaoAK {api_key}"}
     params = {"query": query, "size": 10}
@@ -113,7 +125,7 @@ def search_kakao_local(query, api_key):
     if res.status_code == 200:
         return res.json()['documents']
     else:
-        st.error(f"카카오 API 호출 실패 (status: {res.status_code})")
+        st.error(f"실시간 인기명소 조회 실패 (status: {res.status_code})")
         return []
 
 # 9️⃣ 계절별 키워드 (예시)
@@ -124,13 +136,16 @@ season_keywords = {
     "겨울": ["눈꽃", "스키장", "온천", "겨울축제"]
 }
 
-# 🔟 카카오 API 키
-api_key = st.secrets["KAKAO_REST_API_KEY"]
+# 🔟 카카오 API 키 (배포 시 Streamlit Secrets에 추가하세요)
+api_key = st.secrets.get("KAKAO_REST_API_KEY", None)
+
+# 사용자에게 친근한 안내 문구
+st.caption("※ 실시간 지역 정보는 외부 서비스에서 가져옵니다. 검색 버튼을 눌러 최신 결과를 확인하세요.")
 
 # 1️⃣1️⃣ 계절별 인기 키워드로 관광지 검색
 all_kakao_places = []
 for keyword in season_keywords[season]:
-    results = search_kakao_local(f"{region_full} {keyword}", api_key)
+    results = search_local_popular(f"{region_full} {keyword}", api_key)
     all_kakao_places.extend(results)
 
 # 중복 제거 및 데이터프레임 변환
@@ -139,15 +154,17 @@ df_kakao = pd.DataFrame(unique_places.values())
 
 # 1️⃣2️⃣ 최종 추천 리스트에 카카오 API 관광지명 포함 여부 표시
 if not df_recommended.empty and not df_kakao.empty:
-    df_recommended['카카오인기지'] = df_recommended['관광지명'].apply(
+    df_recommended['인기여부'] = df_recommended['관광지명'].apply(
         lambda x: "예" if any(x in name for name in df_kakao['place_name']) else "아니오"
     )
 else:
-    df_recommended['카카오인기지'] = "데이터없음"
+    df_recommended['인기여부'] = "데이터없음"
 
 # 1️⃣3️⃣ 결과 출력
-st.header(f"안녕하세요, {name}님! {age_group} 세대와 {region_full} 지역, {season} 추천 관광지입니다.")
-st.table(df_recommended[['관광지명', '카카오인기지']])
+st.header(f"안녕하세요, {name}님! {age_group} 의 {region_full} {season} 추천 관광지입니다.")
+st.markdown('<div class="recommend-card">', unsafe_allow_html=True)
+st.table(df_recommended[['관광지명', '인기여부']])
+st.markdown('</div>', unsafe_allow_html=True)
 
 
 

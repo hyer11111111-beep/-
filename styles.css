@@ -1,0 +1,61 @@
+/* Bright, minimal theme */
+:root{
+    --bg: #f7fafc; /* very light */
+    --card: #ffffff;
+    --accent: #6b8ef6; /* soft blue */
+    --accent-2: #8bd3c7; /* pastel teal */
+    --muted: #6b7280;
+    --text: #0f1724;
+    --surface: #f1f5f9;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text) !important;
+    font-family: Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Main container */
+.block-container{
+    background: var(--card);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 6px 18px rgba(15,23,36,0.06);
+    border: 1px solid rgba(15,23,36,0.04);
+}
+
+/* Headings */
+h1, h2, h3 { color: var(--text); margin: 0 0 8px 0; }
+.muted { color: var(--muted); font-size: 13px; }
+
+/* Sidebar */
+[data-testid="stSidebar"] { background: var(--surface); }
+
+/* Buttons */
+.stButton>button {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    color: white;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 8px 14px;
+    border: none;
+}
+
+/* DataFrame / tables */
+.stDataFrame table { border-collapse: collapse; width: 100%; }
+.stDataFrame th, .stDataFrame td { padding: 10px 12px; border-bottom: 1px solid rgba(15,23,36,0.06); }
+.stDataFrame th { background: rgba(15,23,36,0.02); text-align: left; }
+
+/* Card list for recommendations */
+.recommend-card { background: var(--card); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid rgba(15,23,36,0.04); }
+.recommend-title { font-weight: 700; margin-bottom: 6px; }
+.recommend-sub { color: var(--muted); font-size: 13px; }
+
+/* small helpful text */
+.hint { color: var(--muted); font-size: 13px; }
+
+/* responsive tweaks */
+@media (max-width: 600px) {
+    .block-container { padding: 12px; }
+    .stButton>button { width: 100%; }
+}
